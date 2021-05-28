@@ -1,6 +1,12 @@
 // Interactive demo of the persistence pipeline in 2D,
 // building on javaplexDemo.pde from https://github.com/appliedtopology/javaplex.
 
+// To do:
+// - drawing the simplicies is the bottle-neck, not doing the homology calculations.
+//   (Can see this using the 'h' keystroke, since then the homology is not computed.)
+//   How to optimize?
+// - If f is increased, keep existing image and draw only the additional simplices.
+//   Should be much faster.  No such trick works for decreasing f, though.
 
 import edu.stanford.math.plex4.api.*;
 import edu.stanford.math.plex4.examples.*;
@@ -15,12 +21,10 @@ import java.util.List;
 double[][] pts;
 double[][] pts1, pts2, pts3, pts4, pts5, pts6, pts7, pts8;
 
-float offsetX,offsetY,sizeX,sizeY;
-int dragX,dragY,oldmouseX,oldmouseY;
-double eps = 0.01;
-double f = eps;
-double maxeps = 0.3;
-Table table;
+float sizeX=7,sizeY=7;
+double eps;
+double f;
+double maxeps; // maximum epsilon value passed to javaplex
 VietorisRipsStream<double[]> vrs;
 FiltrationConverter fc;
 AbstractPersistenceAlgorithm<Simplex> algo;
@@ -30,25 +34,32 @@ int num_pts = 0;
 PFont ft;
 float int_max = 0;
 float max = 0;
+int barcode_width;
+int barcode_height;
+float barcode_left;
+float barcode_top;
+int font_size = 20;
+boolean show_barcode = true;
+boolean redraw_needed = true;
+boolean recalc_needed = true;
+int cur_width = 0, cur_height = 0;
 
 void settings() {
-  fullScreen();
+  // It works best to start at the right size initially.
+  // But fullScreen() doesn't get it quite right.
+  //fullScreen();
+  size(2560, 1440);
+  //size(1920, 1050);
 }
 
 void setup() {
-  ft = createFont("Courier", 16, true);
-  textFont(ft, 14);
-  float xs = width;
-  float ys = height;
-  background(255);
-  line(xs/2, 0, xs/2, 0.8*ys);
-  line(0, 0.8*ys, xs, 0.8*ys);
-  fill(0);
-  draw_instructions(0.08*xs, 0.8*ys, xs, ys);
-  init_box(xs/2, 0, xs, 0.8*ys);
-  fill(0);
+  // Most things adapt to the window resizing, but the loaded point cloud
+  // data is scaled to the starting window size...  
+  surface.setResizable(true);
+
+  ft = createFont("Courier", 26, true);
+  textFont(ft, font_size);
   resetPoints();
-  setupVRS();    
   pts1 = load_pts(1);
   pts2 = load_pts(2);
   pts3 = load_pts(3);
@@ -60,14 +71,46 @@ void setup() {
 }
 
 void draw() {
-//  background(255);
-  fill(255);
-  rect(0, 0, width/2, 0.8*height);
-  stroke(0);
-  fill(0);
-  
-    for(Simplex s : vrs) {
+  if(recalc_needed)
+  {
+    setupVRS();    
+    recalc_needed = false;
+  }
+
+  // Detect resizing:
+  if((cur_width != width) || (cur_height != height))
+  {
+    redraw_needed = true;
+    cur_width = width;
+    cur_height = height;
+  }
+
+  if(!redraw_needed)
+  {
+    delay(50); // milliseconds
+    return;
+  }
+
+  barcode_width = (int)(0.42*width);
+  barcode_height = (int)(0.75*height);
+  // Slightly off center to the right, to make room for "dim i" labels:
+  barcode_left = 0.75*width - barcode_width/2 + font_size*2;
+  // Slightly up from center to make room for the x-axis labels:
+  barcode_top = 0.4*height - barcode_height/2 - font_size;
+
+  background(255);
+
+  line(width/2.0, 0, width/2.0, 0.8*height);
+  line(0, 0.8*height, width, 0.8*height);
+
+  draw_instructions(0.05*width, 0.8*height, width, height);
+  draw_barcode();
+
+  strokeWeight(2);
+
+  for(Simplex s : vrs) {
     double fv = fc.getFiltrationValue(vrs.getFiltrationIndex(s));
+
     if(fv > f)
       continue;
 
@@ -85,7 +128,7 @@ void draw() {
             (float)pts[ix[1]][0],(float)pts[ix[1]][1]);
         break;
       case 2:
-        fill(0,0,255,20);
+        fill(0,0,255,30);
         triangle((float)pts[ix[0]][0],(float)pts[ix[0]][1],
             (float)pts[ix[1]][0],(float)pts[ix[1]][1],
             (float)pts[ix[2]][0],(float)pts[ix[2]][1]);
@@ -94,6 +137,8 @@ void draw() {
         continue;
     }
   }
+  strokeWeight(1);
+  redraw_needed = false;
 }
 
 //*****************************************
@@ -101,9 +146,27 @@ void draw() {
 //*****************************************
 
 void setupVRS() {
+  // 2 is maxDimension; maxeps is maxFiltrationValue, 1000 is numDivisions.
+  // Putting numDivisions lower doesn't speed things up noticably.
   vrs = Plex4.createVietorisRipsStream(pts,2,maxeps,1000);
   fc = vrs.getConverter();
-  ints=null;
+
+  redraw_needed = true;
+  
+  // We'll compute the barcodes even when not displaying them,
+  // since this is used to know the maximum epsilon value.
+  //if(!show_barcode) return;
+
+  // compute intervals
+  // "2" means to compute H_0 and H_1.  I'm guessing this defaults
+  // to working over the rationals?
+  algo = Plex4.getDefaultSimplicialAlgorithm(2);
+  ints = algo.computeIntervals(vrs);
+  //println(ints);
+  String s = ints.toString();
+  
+  // convert intervals into tidy array
+  intervals = ints_to_intervals(s);
 }
 
 //*****************************************
@@ -112,15 +175,9 @@ void setupVRS() {
 
 void resetPoints() {
       pts=new double[0][2];
-      dragX=0;
-      dragY=0;
-      offsetX=0;
-      offsetY=0;
-      sizeX=5;
-      sizeY=5;
-      f = 10;
+      f = 0;
       eps = 10;
-      maxeps = 300;
+      maxeps = 400; // For smaller data sets, ~1000 works ok.
 }
 
 //*****************************************
@@ -128,37 +185,25 @@ void resetPoints() {
 //*****************************************
 
 void draw_instructions(float xa, float ya, float xb, float yb) {
-  int h = 14;
-  text("INSTRUCTIONS", xa+50, h+ya);
-  text("click        -- adds a point ", xa +10, 3*h + ya); 
-  text("SHIFT-click  -- removes a point", xa +10, 4*h + ya); 
-  text("1-4          -- loads example data sets", xa+10, 5*h + ya);
-  text("T, Y, U, I   -- saves current data set to 5, 6, 7, or 8", xa+10, 6*h + ya);
-  text("5-8          -- loads saved data set", xa+10, 7*h + ya);  
-  text("RIGHT        -- step Vietoris-Rips complex forward", xa+10, 8*h+ya);
-  text("LEFT         -- step Vietoris-Rips complex back", xa+10, 9*h+ya);
-  text("C            -- clear points", xa + 10, 10*h+ya);
-  text("Q            -- quit", xa+10, 11*h+ya);
-  text("InteractiveJPDwB. Luke Wolcott. 2016.", xa+850, 11*h+ya);
+  int h = font_size-1;
+  fill(0);
+  //text("INSTRUCTIONS", xa+10, yb-10*h);
+  text("click        -- adds a point ", xa +10, yb-9*h); 
+  text("SHIFT-click  -- removes a point", xa +10, yb-8*h); 
+  text("1-4          -- loads example data sets", xa+10, yb-7*h);
+  text("T, Y, U, I   -- saves current data set to 5, 6, 7, or 8", xa+10, yb-6*h);
+  text("5-8          -- loads saved data set", xa+10, yb-5*h);  
+  text("RIGHT        -- step Vietoris-Rips complex forward", xa+10, yb-4*h);
+  text("LEFT         -- step Vietoris-Rips complex back", xa+10, yb-3*h);
+  text("C            -- clear points", xa + 10, yb-2*h);
+  text("Q            -- quit", xa+10, yb-h);
+  text("InteractiveJPDwB Instructions.", xa+600, yb-9*h);
+  text("Luke Wolcott, 2016, Dan Christensen, 2018.", xa+600, yb-h);
 }
 
 //*****************************************
-// Initialize barcode box
-//*****************************************
-
-void init_box(float xa, float ya, float xb, float yb) {
-  float cx = (xa + xb)/2;
-  float cy = (ya + yb)/2;
-  fill(255);
-  stroke(0,0,204);
-  strokeWeight(1.5);
-  rect(cx - 250, cy - 250, 500, 500);
-  stroke(0);
-  strokeWeight(1);
-}
-
-//*****************************************
-// On mousepress, if within data box then add a point. 
+// On mousepress, if within data box then add a point.
+// If in barcode, set f based on x position.
 //*****************************************
 
 void mousePressed() {
@@ -166,8 +211,7 @@ void mousePressed() {
     for (int i = 0; i < pts.length; i++){
       if (sq((float) pts[i][0]-mouseX)+sq((float) pts[i][1]-mouseY) < 25){  
         pts = remove_row(i);
-        setupVRS();
-        draw_barcode();
+        recalc_needed = true;
         break;
       }
     }
@@ -176,16 +220,17 @@ void mousePressed() {
     if ((mouseX < width/2) && (mouseY < 0.8*height)) {
       double[] pt = new double[2];
 
-      translate(dragX,dragY);
-      translate(offsetX,offsetY);
-
       pt[0] = mouseX;
       pt[1] = mouseY;
       
       println(pt[0]+","+pt[1]);
       pts = (double[][]) append(pts,pt);
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
+    }
+    else if (show_barcode && (mouseX >= barcode_left) && (mouseX <= barcode_left+barcode_width)
+             && (mouseY >= barcode_top) && (mouseY <= barcode_top+barcode_height+40)) {
+      f = ((mouseX - barcode_left)/barcode_width)*max;
+      redraw_needed = true;
     }
   }
 }
@@ -195,7 +240,6 @@ void mousePressed() {
 //
 // Q      -- quit
 // C      -- clear points
-// B      -- run homology computation and plot barcode
 // LEFT   -- step Vietoris-Rips complex back
 // RIGHT  -- step Vietoris-Rips complex forward
 // 1-4    -- loads pre-stored data sets
@@ -204,8 +248,6 @@ void mousePressed() {
 //*****************************************
 
 void keyPressed() {
-  float x_size = width/2;
-  float y_size = 0.8*height;
   switch(key) {
     case 'q':
     case 'Q':
@@ -215,61 +257,47 @@ void keyPressed() {
     case 'c':
     case 'C':
       resetPoints();
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
       break;
       
-    case 'b':
-    case 'B':
-      draw_barcode();
-      break;
-    
     case '1':                              
       pts = pts1;
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
       break;    
   
     case '2':                              
       pts = pts2;
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
       break;
      
     case '3':                              
       pts = pts3;
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
       break;
      
     case '4':                             
       pts = pts4;
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
       break;
       
     case '5':
       pts = pts5;
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
       break;
       
     case '6':
       pts = pts6;
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
       break;
       
     case '7':
       pts = pts7;
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
       break;
       
     case '8':
       pts = pts8;
-      setupVRS();
-      draw_barcode();
+      recalc_needed = true;
       break;
       
     case 't':
@@ -292,21 +320,39 @@ void keyPressed() {
       pts8 = pts;
       break;    
          
+    case '0':
+      f = 0;
+      redraw_needed = true;
+      break;
+      
+    case 'h':
+      show_barcode = !show_barcode;
+      redraw_needed = true;
+      break;
+
     case CODED:
       switch(keyCode) {
         case RIGHT:
-          f += eps;
+          if(f < 200)
+            f += eps;
+          else
+            f += 2*eps;
+          // Using maxeps instead of max here means that f can go beyond
+          // the barcode plot.  Sometimes that's useful.
+          if (f>maxeps)
+            f=maxeps;
+          redraw_needed = true;
           println(f+": "+eps);
-          if (f>max)
-            f=max;
-          draw_barcode();
           break;
         case LEFT:
-          f -= eps;
-          println(f+": "+eps);
+          if(f < 200)
+            f -= eps;
+          else
+            f -= 2*eps;
           if(f<0)
             f=0;
-          draw_barcode();
+          redraw_needed = true;
+          println(f+": "+eps);
           break;
     }    
   }
@@ -332,9 +378,11 @@ double[][] load_pts(int n) {
   else 
     tablen = loadTable("seed4_circle.csv", "header");              
   ptsn = new double[tablen.getRowCount()][2];
+  int i=0;
   for (TableRow row : tablen.rows()){
-    ptsn[row.getInt("point_id")][0] = row.getDouble("X_value")*width/2*0.9+width/2*0.05;
-    ptsn[row.getInt("point_id")][1] = row.getDouble("Y_value")*0.8*height*0.9+0.8*height*0.05;
+    ptsn[i][0] = row.getDouble("X_value")*width/2*0.9+width/2*0.05;
+    ptsn[i][1] = row.getDouble("Y_value")*0.8*height*0.9+0.8*height*0.05;
+    i++;
   }
   return ptsn;
 }
@@ -388,6 +436,23 @@ float[][] ints_to_intervals(String s){
     println(intervals[j][0], intervals[j][1], intervals[j][2]);
   } 
   
+  // Figure out horizontal scale.
+  int_max = 0;
+  for (int i=0; i<intervals.length; i=i+1){
+    if (intervals[i][2] > int_max){
+      int_max = intervals[i][2];
+    }
+    // The above ignore's NaN's, so also need to handle when the start of
+    // an infinite interval is larger than the ends of all of the finite
+    // intervals:
+    if (intervals[i][1] > int_max){
+      int_max = intervals[i][1];
+    }
+  }
+  println("Max interval value is " + int_max + ".");
+  max = int_max+100;           // Adjust so max isn't cut off.
+  if(max < 400) max = 400;     // Ensure at least some range given.
+
   return intervals;
 }
 
@@ -397,7 +462,7 @@ float[][] ints_to_intervals(String s){
 //*****************************************
 
 void array_to_barcode(float[][] intervals){
-    int nrow = intervals.length;
+  int nrow = intervals.length;
        
   // Look through table and figure out where the dimension changes.  
   int[] spots = {0};
@@ -414,77 +479,62 @@ void array_to_barcode(float[][] intervals){
   }
   spots = (int[]) append(spots,nrow);
   
-  // Figure out horizontal scale.
-  int_max = 0;
-  for (int i=0; i<nrow; i=i+1){
-    if (intervals[i][2] > int_max){
-      int_max = intervals[i][2];
-    }
-  }
-  
-  println("Max interval value is " + int_max + ".");
-  println("Infinite lines go all the way to end.");
-  max = int_max*(1.1);        // Rescale so max isn't cut off. 
-
-  // Convert infinity to max length.
-  for (int i=0; i<nrow; i=i+1){
-    if(Float.isNaN(intervals[i][2])){
-      intervals[i][2] = max;
-    }
-  }     
-  
   // Start drawing lines.
-  float a = 0.75*width - 250;
-  float b = 0.4*height - 250;
+  // These are set in draw() so they can be used for mouse presses too:
+  float a = barcode_left;
+  float b = barcode_top;
   float spaces = nrow - dims.length + 2 + 2 +4*(dims.length-1);
-  float incr = 500/spaces;
+  float incr = barcode_height/spaces;
   float y=b;      
-  textSize(10);
+  textSize(font_size);
   fill(0);
   for (int j=0; j<dims.length; j=j+1){
     y = y + 2*incr;
-    text("dim " + dims[j], a-40, y);
+    text("dim " + dims[j], a-font_size*4, y);
+    if(dims[j] == 1)
+      stroke(255,0,0);
     for (int k=spots[j]; k<spots[j+1]; k=k+1){    
       float start = intervals[k][1];
       float finish = intervals[k][2];
-      line(a + 500*(start/max), y, a + 500*(finish/max), y);
+      // Convert infinity to max length.
+      if(Float.isNaN(finish)) finish = max;
+      strokeWeight(2.5);
+      line(a + barcode_width*(start/max), y, a + barcode_width*(finish/max), y);
       y = y + incr;
     }
     if (j < (dims.length-1)){
       y = y + 1*incr;
       stroke(0,0,204);
       strokeWeight(1.5);
-      line(a, y, a+500, y);        // Draws a full line to separate dimensions
+      line(a, y, a+barcode_width, y);        // Draws a full line to separate dimensions
       stroke(0);
       strokeWeight(1);
     }
   }
-  text(int(max) + " = max", a+490, b+520);
-  text(0, a-2, b+520);
+  text(int(max), a+barcode_width-30, b+barcode_height+font_size+10);
+  text(0, a-2, b+barcode_height+font_size+10);
   stroke(0,0,204);
-  strokeWeight(1.5);      
-  line(a, b+500, a, b+510);
-  line(a+500, b+500, a+500, b+510);
-  line(a + (500/max)*((float) f), b + 500, a + (500/max)*((float) f), b + 510);
+  strokeWeight(2);      
+  line(a, b+barcode_height, a, b+barcode_height+15);
+  line(a+barcode_width, b+barcode_height, a+barcode_width, b+barcode_height+15);
+  line(a + barcode_width*((float) f/max), b + barcode_height,
+       a + barcode_width*((float) f/max), b + barcode_height+15);
   stroke(0);
   strokeWeight(1);
-
 }
   
 void draw_barcode(){
-      // compute intervals
-      algo = Plex4.getDefaultSimplicialAlgorithm(2);
-      ints = algo.computeIntervals(vrs);
-      //println(ints);
-      String s = ints.toString();
-      
-      // convert intervals into tidy array
-      intervals = ints_to_intervals(s);
-      
       //initialize barcode region   
       fill(255);
       rect(width/2, 0, width, 0.8*height);
-      init_box(width/2, 0, width, 0.8*height);      
+      
+      if(!show_barcode) return;
+      
+      stroke(0,0,204);
+      strokeWeight(1.5);
+      rect(0.75*width - barcode_width/2 + font_size*2, 0.4*height - barcode_height/2 - font_size, barcode_width, barcode_height);
+      stroke(0);
+      strokeWeight(1);
       
       // quit if there are no points in the array
       if (intervals.length == 0) {
@@ -507,13 +557,3 @@ double[][] remove_row(int r){
   }
   return temp;
 }
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
