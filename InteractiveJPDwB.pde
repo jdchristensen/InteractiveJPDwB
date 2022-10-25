@@ -188,16 +188,16 @@ void draw_instructions(float xa, float ya, float xb, float yb) {
   int h = font_size-1;
   fill(0);
   //text("INSTRUCTIONS", xa+10, yb-10*h);
-  text("click        -- adds a point ", xa +10, yb-9*h); 
-  text("SHIFT-click  -- removes a point", xa +10, yb-8*h); 
+  text("click in fig -- adds a point (shift-click to remove)", xa +10, yb-9*h);
+  text("click in VR  -- set Vietoris-Rips parameter", xa +10, yb-8*h);
   text("1-4          -- loads example data sets", xa+10, yb-7*h);
   text("T, Y, U, I   -- saves current data set to 5, 6, 7, or 8", xa+10, yb-6*h);
   text("5-8          -- loads saved data set", xa+10, yb-5*h);  
-  text("RIGHT        -- step Vietoris-Rips complex forward", xa+10, yb-4*h);
-  text("LEFT         -- step Vietoris-Rips complex back", xa+10, yb-3*h);
   text("C            -- clear points", xa + 10, yb-2*h);
+  text("RIGHT/LEFT   -- step Vietoris-Rips parameter forward/back", xa+10, yb-4*h);
+  text("0            -- set Vietoris-Rips parameter to 0", xa+10, yb-3*h);
   text("Q            -- quit", xa+10, yb-h);
-  text("InteractiveJPDwB Instructions.", xa+600, yb-9*h);
+  //text("InteractiveJPDwB Instructions.", xa+600, yb-9*h);
   text("Luke Wolcott, 2016, Dan Christensen, 2018.", xa+600, yb-h);
 }
 
